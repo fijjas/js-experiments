@@ -10,8 +10,8 @@ Quiet/Signaling flag  - 1 bit
 Unused space          - 51 bit
 
 Default NaN:
-1        111 11111111    0      000 00000000 00000000 0000000 00000000 00000000 00000000
-sign      NaN bit       q/s             Payload (51bit)
+1    111 11111111    0      000 00000000 00000000 0000000 00000000 00000000 00000000
+S    NaN (11 bit)   q/s             Payload (51bit)
 */
 
 class NaN_Value {
