@@ -56,3 +56,13 @@ Constant pool (size = 1)
  - length: 1
            0: 0x276818e03211 <String[1]: #1>
  */
+
+function intWithUnderscores() {
+  return 12_345_000;
+}
+intWithUnderscores();
+
+/* d8 --print-bytecode --print-bytecode-filter='intWithUnderscores' v8-const-opt/math.js
+         0x212b00002230 @    0 : 01 0d a8 5e bc 00 LdaSmi.ExtraWide [12345000]
+         0x212b00002236 @    6 : ab                Return
+ */
