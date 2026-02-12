@@ -338,6 +338,43 @@ See: [`v8-ic-transitions`](v8-ic-transitions/)
 
 ---
 
+## 16. Closure scope depth is free — the first indirection costs
+
+Accessing a variable from any closure level costs ~5-6x vs a local variable. But depth doesn't matter:
+
+| Access pattern | Cost | Ratio |
+|----------------|------|-------|
+| Local variable | ~1.3 ns | 1x |
+| Closure depth 1 | ~7 ns | 5x |
+| Closure depth 2 | ~7 ns | 5x |
+| Closure depth 4 | ~7 ns | 5x |
+| Closure depth 8 | ~7 ns | 5x |
+| 4 vars from 4 levels | ~7 ns | 5x |
+
+TurboFan resolves the scope chain at compile time, just like prototype chain lookup. The overhead is "context slot access" (reading from a Context object instead of a register), not "scope chain walk."
+
+Practical implication: deeply nested closures (callbacks in callbacks, middleware chains, promise chains) don't add incremental cost per nesting level. The cost is paid once at the first closure boundary. Don't flatten your code for performance — flatten it for readability.
+
+```js
+// This is fine — depth 4 costs the same as depth 1
+app.use((req, res, next) => {
+  const user = req.user;
+  validate(user, (err) => {
+    if (err) return next(err);
+    authorize(user, (err) => {
+      if (err) return next(err);
+      process(user, (result) => {
+        res.json(result); // accessing `user` from depth 4 — same cost as depth 1
+      });
+    });
+  });
+});
+```
+
+See: [`v8-closure-scope`](v8-closure-scope/)
+
+---
+
 ## The cost hierarchy
 
 From bytecode analysis, the actual cost ranking:
@@ -350,10 +387,11 @@ From bytecode analysis, the actual cost ranking:
 6. **Context allocation** (`CreateFunctionContext`) — per-closure overhead
 7. **Context slot access** (mutable vs immutable) — per-access micro-cost
 8. **Prototype chain depth** — free (no cost at any depth)
-9. **Closure creation** (`CreateClosure`) — near-zero
-10. **Constant folding** — free at compile time
+9. **Closure scope depth** — free after first level (depth 1 ≈ depth 8)
+10. **Closure creation** (`CreateClosure`) — near-zero
+11. **Constant folding** — free at compile time
 
-Most JS performance advice focuses on #6-8. The real gains are in #1-5.
+Most JS performance advice focuses on #6-9. The real gains are in #1-5.
 
 ---
 
