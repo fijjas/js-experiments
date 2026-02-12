@@ -1001,4 +1001,84 @@ See: [`v8-generators`](v8-generators/)
 
 ---
 
+## 26. `async`/`await` overhead: each `await` is a microtask + state machine suspend
+
+**Myth:** "async/await has negligible overhead."
+
+**Reality:** Each `await` compiles to a generator suspend/resume cycle with promise plumbing. An `async` function without any `await` is essentially free (1.03x). But each `await` adds ~50 bytes of bytecode and one microtask tick.
+
+**Bytecode proof (Node v20):**
+
+`syncAdd(a, b)`: 6 bytes — `Ldar a1, Add a0, Return`
+
+`async function asyncAdd(a, b) { return a + b; }`: 50 bytes — `_AsyncFunctionEnter` → Add → `_AsyncFunctionResolve` → Return, plus full catch handler with `_AsyncFunctionReject`
+
+`async function sequential()` with 2 awaits: 156 bytes — `SwitchOnGeneratorState` (state machine), each `await` → `_AsyncFunctionAwaitUncaught` → `SuspendGenerator` → `ResumeGenerator` → `_GeneratorGetResumeMode` → `TestReferenceEqual` → ReThrow branch. Async functions ARE generators with promise plumbing.
+
+**Benchmarks (1M iterations):**
+- Sync call: 10ms
+- Async (no internal await): 10ms — the `async` keyword alone costs nothing at the call site
+- Async (sequential await at call site): 91ms — 9x overhead
+- Async (batch 1M promises → Promise.all): 498ms — 50x, memory pressure from 1M promise allocations
+
+**Promise creation:**
+- `Promise.resolve(x)`: 66ms
+- `new Promise(r => r(x))`: 127ms — 1.9x slower (closure allocation for executor)
+- Cached `Promise.resolve(42)`: 68ms — no optimization for re-awaiting same promise
+
+**Promise.all is slower than sequential for CPU-bound work:**
+- 3 sequential awaits: 22ms
+- `Promise.all([...3])`: 53ms — 2.4x SLOWER
+- No actual parallelism (same thread). Promise.all adds: array allocation, completion tracking, result gathering. Zero benefit without I/O to interleave.
+
+**Async generators: 6.2x overhead over sync generators:**
+- Sync generator (100K yields): 5ms
+- Async generator (100K yields): 29ms — each yield becomes a microtask boundary
+
+**.then() chain vs await: equivalent:**
+- `.then()` chain (100K): 13ms
+- `await` sequential (100K): 12ms — V8 optimizes both the same way
+
+**Async in compute-heavy code:**
+- Sync compute: 29ms
+- Async without yield: 30ms — free (1.03x)
+- Async with yield every 10K ops: 75ms — 2.6x, each yield = microtask tick
+
+**Do:**
+```js
+// GOOD — async without unnecessary await (just wraps return in promise)
+async function getData() { return cache.get(key); } // no await = free
+
+// GOOD — sequential await when operations depend on each other
+const user = await getUser(id);
+const posts = await getPosts(user.name);
+
+// GOOD — Promise.all only for actual I/O parallelism
+const [user, settings] = await Promise.all([
+  fetch('/api/user'),     // real network I/O
+  fetch('/api/settings')  // can run in parallel
+]);
+```
+
+**Don't:**
+```js
+// BAD — unnecessary await on return (adds microtask for nothing)
+async function wrapper() { return await innerAsync(); }
+// GOOD: return innerAsync(); — no await needed
+
+// BAD — Promise.all for CPU-bound work (2.4x SLOWER than sequential)
+const [a, b, c] = await Promise.all([compute(1), compute(2), compute(3)]);
+// GOOD: const a = await compute(1); const b = await compute(2); ...
+
+// BAD — async generator when sync generator suffices (6.2x overhead)
+async function* range(n) { for (let i = 0; i < n; i++) yield i; }
+// GOOD: function* range(n) { for (let i = 0; i < n; i++) yield i; }
+```
+
+**Rule:** `async` is free. `await` is not — each one is a microtask + suspend/resume. Don't use `Promise.all` for CPU work. Don't make generators async unless they actually await I/O.
+
+See: [`v8-async-await`](v8-async-await/)
+
+---
+
 *Built from bytecode experiments in this repo. Each recommendation verified with `node --print-bytecode`.*
