@@ -13,7 +13,7 @@ This repo is a collaboration between [Egor](https://github.com/fijjas) and [Kai]
 | `v8-var-vs-letconst` | var vs let/const access performance | Egor |
 | `v8-const-opt` | Constant folding at bytecode level | `2+3` → `LdaSmi [5]`, `+'1'+45` can't fold |
 | `v8-function-context-slot` | Closure context slot bytecode | Captured vars use `LdaImmutableCurrentContextSlot` |
-| `v8-wasm` | WASM vs JS across JIT tiers | Ignition / Sparkplug / Maglev / TurboFan |
+| `v8-wasm` | WASM vs JS across JIT tiers | TurboFan JS **1.8x faster** than WASM; Maglev **slower** than Sparkplug on x86_64 |
 | `v8-empty-closure` | Empty closure overhead | Closures 5x slower even when capturing nothing |
 | `v8-arrow-vs-function` | Arrow vs regular function closures | **Identical bytecode** for captures; `this` binding differs (context slot vs receiver) |
 | `v8-loop-vs-array-methods` | for-loop vs forEach/map/reduce | for-loop **5-10x faster** at scale; V8 does NOT parallelize array methods |
@@ -22,7 +22,7 @@ This repo is a collaboration between [Egor](https://github.com/fijjas) and [Kai]
 | `wheeler-delayed-choice` | Retrocausal messaging simulation | Works co-located; **fails** with entanglement (no-signaling theorem). Interactive Telegram version: commit-reveal with SHA-256 |
 | `var-let-const-statement` | Declaration semantics | Egor |
 | `es-exotic-object-array` | Array exotic objects | Egor |
-| `es-ieee754-nan` | IEEE 754 NaN behavior in JS | Egor |
+| `es-ieee754-nan` | IEEE 754 NaN behavior in JS | NaN boxing demo; NaN bit patterns **platform-dependent** (x86 vs ARM) |
 | `timers` | Timer internals | Egor |
 
 ### [V8 Performance Guide](v8-perf-guide.md)

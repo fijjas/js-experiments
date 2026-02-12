@@ -208,14 +208,17 @@ add("hello", " world");  // bailout: "not a Smi"
 
 See: [`v8-smi-deopt`](v8-smi-deopt/)
 
-## 11. WASM for compute, JS for everything else
+## 11. WASM is not always faster than JS
 
-WebAssembly runs as near-native machine code without GC pauses or type speculation overhead. For pure computation (tight loops, math), WASM is 10-100x faster.
+Counterintuitively, TurboFan-optimized JS can **beat WASM** for type-stable integer work. Fibonacci 1B iterations: JS 1.0s vs WASM 1.8s (1.8x faster JS). Why? TurboFan knows the types are SMI and generates tighter machine code than WASM's ahead-of-time compilation.
 
-For typical application code (I/O, DOM, object manipulation), JavaScript's JIT is sufficient and the interop cost of WASM negates gains.
+WASM wins when: types are mixed, GC pressure matters, or the code can't reach TurboFan (too complex, polymorphic). WASM loses when: TurboFan can speculate and the speculation holds.
 
-**Do:** Move algorithmic bottlenecks (crypto, image processing, physics) to WASM.
-**Don't:** Rewrite business logic in WASM — the overhead boundary crossing isn't worth it.
+Also: Maglev (V8's mid-tier JIT) is **slower** than Sparkplug (baseline) for tight loops on x86_64 — the intermediate optimizations add overhead without payoff.
+
+**Do:** Benchmark before moving hot JS to WASM — JS may already be faster.
+**Do:** Move genuinely polymorphic or memory-heavy computation to WASM.
+**Don't:** Assume "native code" (WASM) beats JIT code — speculative optimization is powerful.
 
 See: [`v8-wasm`](v8-wasm/)
 
