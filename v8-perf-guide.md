@@ -257,6 +257,54 @@ var b = {}; b.y = 2; b.x = 1;
 
 See: [`v8-hidden-classes`](v8-hidden-classes/)
 
+## 13. Prototype chain depth is free — don't flatten for performance
+
+V8's inline cache resolves the full prototype chain once and caches the result. Accessing `obj.x` at depth 10 in the prototype chain is the **same speed** as accessing an own property.
+
+All `readX` variants — own, prototype depth 1, depth 5, depth 10 — produce **identical bytecode**: `GetNamedProperty a0, [0], [0]; Return`. Performance differences are entirely in the IC/TurboFan layer, and with monomorphic access, they vanish.
+
+Own property shadowing a prototype value also has no cost — V8 resolves to the own property and caches it.
+
+**Do:** Use prototype chains naturally. Depth doesn't matter.
+**Don't:** Copy prototype methods onto instances for "performance."
+**Don't:** Flatten inheritance hierarchies to avoid prototype lookups.
+
+See: [`v8-prototype-lookup`](v8-prototype-lookup/)
+
+## 14. Don't create methods inside constructors
+
+`this.fn = function(){}` creates a **new closure object per instance**. Even though all closures share the same `SharedFunctionInfo`, TurboFan sees different function targets at the call site and can't inline.
+
+Benchmark: closure-per-instance methods are **30% slower** than prototype methods. Assigning a shared function (`this.fn = sharedFn`) performs identically to prototype methods — confirming the penalty is function identity, not own-vs-prototype.
+
+**Do:** Use prototype methods or class methods.
+**Do:** If you need own methods, assign a shared function reference.
+**Don't:** Use `this.method = function(){}` or `this.method = () => {}` in constructors.
+
+```js
+// slow — 100 instances = 100 different closure objects
+function Widget() {
+  this.val = 1;
+  this.getVal = function() { return this.val; };
+}
+
+// fast — single function on prototype, TurboFan inlines
+function Widget() { this.val = 1; }
+Widget.prototype.getVal = function() { return this.val; };
+
+// also fast — shared function reference
+function getVal() { return this.val; }
+function Widget() { this.val = 1; this.getVal = getVal; }
+
+// also fast — class syntax (sugar for prototype assignment)
+class Widget {
+  constructor() { this.val = 1; }
+  getVal() { return this.val; }
+}
+```
+
+See: [`v8-prototype-lookup`](v8-prototype-lookup/)
+
 ---
 
 ## The cost hierarchy
@@ -266,10 +314,12 @@ From bytecode analysis, the actual cost ranking:
 1. **Per-element function dispatch** (forEach/reduce vs for-loop) — 5-10x at scale
 2. **Lost inlining** (closures in hot paths) — orders of magnitude
 3. **Megamorphic property access** (5+ object shapes) — 3-4x per access
-4. **Context allocation** (`CreateFunctionContext`) — per-closure overhead
-5. **Context slot access** (mutable vs immutable) — per-access micro-cost
-6. **Closure creation** (`CreateClosure`) — near-zero
-7. **Constant folding** — free at compile time
+4. **Closure-per-instance methods** (this.fn = function) — 30% per call
+5. **Context allocation** (`CreateFunctionContext`) — per-closure overhead
+6. **Context slot access** (mutable vs immutable) — per-access micro-cost
+7. **Prototype chain depth** — free (no cost at any depth)
+8. **Closure creation** (`CreateClosure`) — near-zero
+9. **Constant folding** — free at compile time
 
 Most JS performance advice focuses on #5-7. The real gains are in #1-4.
 
