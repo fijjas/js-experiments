@@ -774,4 +774,84 @@ See: [`v8-object-iteration`](v8-object-iteration/)
 
 ---
 
+## 23. Spread is fastest for cloning — but adding new keys kills it
+
+`{...obj}` compiles to a single bytecode opcode: `CloneObject`. This copies the hidden class (Map) and backing store directly. It's the fastest possible shallow copy. But there's a trap.
+
+**Benchmark results (N=2,000,000):**
+
+Shallow copy (5 properties):
+
+| Pattern | Time | vs fastest |
+|---|---|---|
+| manual `{a: obj.a, ...}` | 13ms | 1x |
+| `{...obj}` | 61ms | 4.7x |
+| `Object.assign({}, obj)` | 235ms | 18x |
+| `JSON.parse(stringify)` | 1,694ms | 130x |
+
+Spread beats Object.assign by **3.9x** for cloning.
+
+But watch what happens when you ADD a new key:
+
+| Pattern | Time |
+|---|---|
+| `{...obj}` (clone only) | 33ms |
+| `{...obj, b: 10}` (override existing) | 36ms |
+| `{...obj, d: 4}` (add new key) | **1,246ms** — 37x slower! |
+| `Object.assign({}, obj, {d: 4})` | 190ms |
+
+**Why?** The bytecode tells the story:
+
+`{...obj}` — 5 bytes:
+```
+CloneObject a0       // single opcode: copies Map + backing store
+Return
+```
+
+`{...obj, d: 4}` — 14 bytes:
+```
+CloneObject a0              // clone with original Map
+DefineNamedOwnProperty [d]  // add new key → forces Map transition!
+```
+
+`CloneObject` copies the source's hidden class. Overriding an existing key keeps the same Map (fast). But adding a new key triggers `DefineNamedOwnProperty`, which creates a **new hidden class transition** — expensive at scale.
+
+`Object.assign` is a function call (more overhead for simple clones), but its internals handle property additions incrementally through the standard store path, which is faster for merges.
+
+**Merge two objects:**
+
+| Pattern | Time |
+|---|---|
+| `Object.assign({}, a, b)` | 190ms |
+| `{...a, ...b}` | **3,487ms** — 18x slower |
+
+When merging, `Object.assign` wins decisively.
+
+**Do:**
+```js
+// GOOD — fastest clone (single CloneObject opcode)
+const copy = { ...obj };
+
+// GOOD — override existing keys (same shape, fast)
+const updated = { ...obj, name: 'new' };
+
+// GOOD — merge multiple objects
+const merged = Object.assign({}, defaults, userConfig);
+```
+
+**Don't:**
+```js
+// BAD — spread + new keys = Map transition, 37x slower
+const extended = { ...obj, newKey: value };
+// Use Object.assign({}, obj, { newKey: value }) instead
+
+// BAD — two spreads = double Map transition
+const merged = { ...defaults, ...overrides };
+// Use Object.assign({}, defaults, overrides) instead
+```
+
+See: [`v8-object-spread`](v8-object-spread/)
+
+---
+
 *Built from bytecode experiments in this repo. Each recommendation verified with `node --print-bytecode`.*
