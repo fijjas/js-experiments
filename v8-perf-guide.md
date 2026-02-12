@@ -485,6 +485,66 @@ function getNestedValue(obj) {
 
 See: [`v8-try-catch`](v8-try-catch/)
 
+## 19. `arguments` is not slow — but mixing it with named params is
+
+**Old wisdom:** "Never use `arguments`, always use rest params."
+
+**Reality:** `arguments` itself is fast — sometimes faster than rest. The real cost is mixing `arguments` with named parameters.
+
+| Test | Time | vs named |
+|------|------|----------|
+| `arguments.length` | 16ms | **5x faster** than `...args.length` (87ms) |
+| `arguments[i]` | 147ms | 2x slower than named (72ms) |
+| `...args[i]` | 109ms | 1.5x slower than named |
+| named(a,b) + `arguments[2]` | 393ms | **4.7x slower** than named+rest (84ms) |
+| `Array.from(arguments)` | 5988ms | **44x slower** than rest |
+| `Array.prototype.slice.call(arguments)` | 724ms | 8x slower than rest |
+
+**Bytecode proof:** `arguments` without named params → `CreateMappedArguments` (16 bytes). Clean.
+
+But `namedPlusArgs(a, b)` using `arguments[2]` → **33 bytes**: `CreateFunctionContext` + `PushContext` + store all named params into context slots. Named params move from registers to the heap. The mapped arguments object must stay in sync with named params, so V8 creates a shared context.
+
+`namedPlusRest(a, b, ...rest)` → **25 bytes**: `CreateRestParameter` + register copies. Named params stay in registers. No context allocation.
+
+**The fundamental difference:**
+- `arguments` is a *mapped* exotic object — `arguments[0] = 42` changes `a`. This requires a shared context.
+- Rest params are a plain `Array` — no aliasing, no context, no mapping.
+
+**Do:**
+```js
+// GOOD — rest params, clean and fast
+function sum(...nums) {
+  return nums.reduce((a, b) => a + b, 0);
+}
+
+// GOOD — named params only (fastest)
+function add(a, b, c) {
+  return a + b + c;
+}
+
+// OK — arguments.length for arity check (faster than rest)
+function variadic() {
+  if (arguments.length === 0) throw new Error('need args');
+  // but then use named params for access
+}
+```
+
+**Don't:**
+```js
+// BAD — named params + arguments = context allocation
+function bad(a, b) {
+  return a + b + arguments[2]; // forces heap context
+}
+
+// BAD — Array.from(arguments) = 44x slower than rest
+function worse() {
+  const args = Array.from(arguments);
+  return args.map(x => x * 2);
+}
+```
+
+See: [`v8-arguments-rest`](v8-arguments-rest/)
+
 ---
 
 *Built from bytecode experiments in this repo. Each recommendation verified with `node --print-bytecode`.*
