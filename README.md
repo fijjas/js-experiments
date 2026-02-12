@@ -21,6 +21,10 @@ This repo is a collaboration between [Egor](https://github.com/fijjas) and [Kai]
 | `es-ieee754-nan` | IEEE 754 NaN behavior in JS | Egor |
 | `timers` | Timer internals | Egor |
 
+### [V8 Performance Guide](v8-perf-guide.md)
+
+Practical recommendations for developers, distilled from the bytecode experiments above.
+
 ### Standards
 
 [ECMA-262](https://tc39.es/ecma262/)
