@@ -547,4 +547,105 @@ See: [`v8-arguments-rest`](v8-arguments-rest/)
 
 ---
 
+## 20. `delete` kills fast properties — use `undefined` or destructure
+
+The advice is right: don't use `delete`. But the reason isn't that the `delete` opcode is slow — it's what happens AFTER.
+
+**What `delete` does internally:**
+
+V8 stores object properties in a fast linear array, keyed by Map (hidden class) offsets. `delete` can't just remove a slot from this array — it would invalidate all offsets. So V8 transitions the entire object to **dictionary mode**: a hash table where every property access requires hashing + lookup instead of a fixed-offset load.
+
+Proof with `%HasFastProperties()`:
+```
+Before delete:  HasFastProperties: true
+After delete:   HasFastProperties: false   ← dictionary mode
+After = undef:  HasFastProperties: true    ← shape preserved
+```
+
+**Benchmark results (N=5,000,000):**
+
+| Operation | Time | vs baseline |
+|---|---|---|
+| `obj.key = undefined` | 40ms | 1x |
+| `delete obj.key` | 1,542ms | **38x slower** |
+| `const {key, ...rest} = obj` | 393ms | 10x slower |
+
+But the real damage is on subsequent reads:
+
+| Access pattern | Time | vs baseline |
+|---|---|---|
+| No delete (monomorphic) | 35ms | 1x |
+| After `= undefined` | 34ms | 1x |
+| After `delete` | 1,746ms | **50x slower** |
+
+Persistent objects (same object, many reads):
+
+| Object state | Time (1M reads) | vs baseline |
+|---|---|---|
+| Intact | 4ms | 1x |
+| After 1 delete | 55ms | **14x slower** |
+| After 3 deletes | 61ms | 15x slower |
+
+**The deoptimization chain:**
+
+Passing a dictionary-mode object to an optimized function **deoptimizes** that function:
+```
+readA(fastObj)   → TurboFan optimized, inline cache hit
+readA(deletedObj) → deoptimized! Falls back to interpreter
+readA(fastObj)   → now slow for ALL objects, not just deleted one
+```
+
+`delete` poisons not just the object, but any optimized function that touches it.
+
+**Arrays:** `delete arr[i]` creates a **holey** array (HOLEY_SMI → needs hole check on every access) but doesn't go to dictionary mode. Less catastrophic than objects, but still worse than `splice` or `= undefined`.
+
+**Bytecode:**
+```
+// DeletePropertySloppy — 2 bytes, same as SetNamedProperty
+LdaConstant [b]          // load property name
+DeletePropertySloppy r0  // delete — triggers Map transition to slow mode
+
+// vs SetNamedProperty — 2 instructions, keeps Map
+LdaUndefined             // load undefined
+SetNamedProperty r0, [b] // set — preserves hidden class
+```
+
+The bytecode is nearly identical. The cost is entirely in the runtime Map transition.
+
+**Do:**
+```js
+// GOOD — set to undefined (fastest, preserves shape)
+obj.key = undefined;
+
+// GOOD — destructure without the key (new object, clean shape)
+const { unwanted, ...clean } = obj;
+
+// GOOD — for objects you pass to hot functions
+function removeKey(obj, key) {
+  const result = {};
+  for (const k of Object.keys(obj)) {
+    if (k !== key) result[k] = obj[k];
+  }
+  return result;
+}
+```
+
+**Don't:**
+```js
+// BAD — transitions to dictionary mode, 50x slower reads
+delete obj.key;
+
+// BAD — poisons optimized functions
+const config = loadConfig();
+delete config.debugFlag; // now ALL reads of config are slow
+processConfig(config);   // deoptimizes processConfig
+
+// BAD — creates holey array
+delete arr[2]; // use arr.splice(2, 1) instead
+```
+
+See: [`v8-delete-operator`](v8-delete-operator/)
+
+---
+
 *Built from bytecode experiments in this repo. Each recommendation verified with `node --print-bytecode`.*
