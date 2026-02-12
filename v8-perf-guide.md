@@ -305,6 +305,37 @@ class Widget {
 
 See: [`v8-prototype-lookup`](v8-prototype-lookup/)
 
+## 15. IC transitions are step functions, not gradual
+
+V8's inline cache has exactly two transition points, not one gradual degradation:
+
+| Shapes | IC State     | Cost    | Ratio |
+|--------|-------------|---------|-------|
+| 1      | Monomorphic | ~2.8 ns | 1x    |
+| 2-4    | Polymorphic | ~8.5 ns | 3x    |
+| 5+     | Megamorphic | ~13 ns  | 4.5x  |
+
+The boundary is exactly **5 shapes** (V8 internal `kMaxPolymorphicMapCount = 4`). Not 8, not gradual.
+
+Key implication: if you're already at 5 shapes, going to 20 doesn't matter much. The IC has already given up. But the jump from 1 to 2 shapes (3x) is the most expensive per-shape transition. Keep hot paths monomorphic.
+
+After megamorphic, V8 still optimizes the function (Maglev/TurboFan compiles it), but can't specialize the property access. The function runs fast; the property lookup runs generic.
+
+```js
+// monomorphic — 1 shape, fastest
+function process(point) { return point.x + point.y; }
+const points = data.map(d => ({ x: d[0], y: d[1] })); // same shape
+points.forEach(process); // 1x
+
+// polymorphic — 4 shapes, 3x
+// avoid mixing object shapes at the same call site
+
+// megamorphic — 5+ shapes, 4.5x
+// but 5 shapes ≈ 32 shapes, so don't stress past the boundary
+```
+
+See: [`v8-ic-transitions`](v8-ic-transitions/)
+
 ---
 
 ## The cost hierarchy
@@ -313,15 +344,16 @@ From bytecode analysis, the actual cost ranking:
 
 1. **Per-element function dispatch** (forEach/reduce vs for-loop) — 5-10x at scale
 2. **Lost inlining** (closures in hot paths) — orders of magnitude
-3. **Megamorphic property access** (5+ object shapes) — 3-4x per access
-4. **Closure-per-instance methods** (this.fn = function) — 30% per call
-5. **Context allocation** (`CreateFunctionContext`) — per-closure overhead
-6. **Context slot access** (mutable vs immutable) — per-access micro-cost
-7. **Prototype chain depth** — free (no cost at any depth)
-8. **Closure creation** (`CreateClosure`) — near-zero
-9. **Constant folding** — free at compile time
+3. **Megamorphic property access** (5+ object shapes) — 3-5x per access
+4. **Polymorphic IC** (2-4 shapes) — 3x per access
+5. **Closure-per-instance methods** (this.fn = function) — 30% per call
+6. **Context allocation** (`CreateFunctionContext`) — per-closure overhead
+7. **Context slot access** (mutable vs immutable) — per-access micro-cost
+8. **Prototype chain depth** — free (no cost at any depth)
+9. **Closure creation** (`CreateClosure`) — near-zero
+10. **Constant folding** — free at compile time
 
-Most JS performance advice focuses on #5-7. The real gains are in #1-4.
+Most JS performance advice focuses on #6-8. The real gains are in #1-5.
 
 ---
 

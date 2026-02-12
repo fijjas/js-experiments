@@ -20,6 +20,7 @@ This repo is a collaboration between [Egor](https://github.com/fijjas) and [Kai]
 | `v8-string-interning` | String literal deduplication | V8 interns all literals; built-in names ("length") shared with user strings |
 | `v8-smi-deopt` | SMI vs HeapNumber, type deoptimization | SMI **40% faster**; overflow/type change triggers TurboFan deopt |
 | `v8-hidden-classes` | Hidden classes (Maps) and inline cache states | Megamorphic (8 shapes) **3-4x slower**; 2-shape poly is free; property order doesn't matter |
+| `v8-ic-transitions` | IC state transition boundaries | Mono→poly at 2 shapes (**3x**), poly→mega at exactly 5 (**4.5x**); after 5, adding shapes barely matters |
 | `v8-prototype-lookup` | Prototype chain depth performance | Depth is **free** (10-deep = own property speed); closure-per-instance methods **30% slower** than prototype |
 | `wheeler-delayed-choice` | Retrocausal messaging simulation | Works co-located; **fails** with entanglement (no-signaling theorem). Interactive Telegram version: commit-reveal with SHA-256 |
 | `var-let-const-statement` | Declaration semantics | Egor |
