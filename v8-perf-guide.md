@@ -393,6 +393,45 @@ From bytecode analysis, the actual cost ranking:
 
 Most JS performance advice focuses on #6-9. The real gains are in #1-5.
 
+## 17. Map vs Object: Map wins for mutation and iteration, Object wins for lookup
+
+Benchmarked at 100k entries:
+
+| Operation | Object | Map | Winner | Ratio |
+|---|---|---|---|---|
+| String key insert | 27ms | 14ms | **Map** | 2x |
+| String key lookup | 2.6ms | 4.7ms | **Object** | 1.8x |
+| Integer key insert | 3.3ms | 9.2ms | **Object** | 2.8x |
+| Integer key lookup | 0.35ms | 1.9ms | **Object** | 5.5x |
+| Delete | 31ms | 20ms | **Map** | 1.6x |
+| has/in check | 2.4ms | 3.8ms | **Object** | 1.6x |
+| Iteration | 21ms | 0.9ms | **Map** | **24x** |
+| entries iteration | 53ms | 1.5ms | **Map** | **35x** |
+
+The big result: **Map iteration is 24-35x faster.** `for-in` uses V8's `ForInPrepare/ForInNext/ForInStep` machinery which enumerates the property descriptor chain. `Object.entries()` additionally creates key-value arrays per entry. Map stores entries in a flat backing array — `forEach` just walks it linearly.
+
+Object integer lookup at 0.35ms is 5.5x faster than Map because V8 treats numeric-keyed objects as dense arrays internally (elements store, not hash table).
+
+**Do:** Use Map for collections that change (add/delete) or need iteration.
+**Do:** Use Object for static lookups, especially with integer-like keys.
+**Don't:** Use `for-in` or `Object.entries()` in hot paths — they're catastrophically slow.
+**Don't:** Use Map as a replacement for simple config objects (overhead of `.get()`/`.set()` vs property access).
+
+```js
+// Object wins — static lookup, integer keys
+const lookup = {};
+for (let i = 0; i < 1000; i++) lookup[i] = data[i];
+// lookup[42] — 0.35ms per 100k lookups
+
+// Map wins — frequent mutation + iteration
+const cache = new Map();
+cache.set(key, value);
+cache.delete(expiredKey);
+cache.forEach((v, k) => process(k, v));  // 24x faster than for-in
+```
+
+See: [`v8-map-vs-object`](v8-map-vs-object/)
+
 ---
 
 *Built from bytecode experiments in this repo. Each recommendation verified with `node --print-bytecode`.*
