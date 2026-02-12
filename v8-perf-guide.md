@@ -1081,4 +1081,85 @@ See: [`v8-async-await`](v8-async-await/)
 
 ---
 
+## 27. WeakRef.deref() costs 12x — WeakMap is the cheap option
+
+**Myth:** "WeakRef is just a reference that lets GC collect."
+
+**Reality:** WeakRef creates a GC-tracked wrapper object. Each `.deref()` is a method call, not a special opcode. WeakMap is the lightweight option for weak associations.
+
+**Bytecode proof (Node v20):**
+
+Direct: `GetNamedProperty a0, [0]` → `Return` — 5 bytes
+
+WeakRef deref: `GetNamedProperty a0, [0]` (load `.deref`) → `CallProperty0` (call it) → `Star0` → `JumpIfToBooleanFalse` (null check) → `GetNamedProperty r0, [1]` (load `.value`) → `Return` — 19 bytes. Two lookups + one call + one branch.
+
+**Benchmarks (1M iterations):**
+- WeakRef creation: 3.3x overhead vs regular reference (~200ns per object)
+- WeakRef.deref(): 12x overhead vs direct access (~35ns per call)
+- FinalizationRegistry.register(): ~50ns per call
+- WeakMap vs Map: 1.35x (mild)
+- WeakRef-based cache vs Map: 3.1x (expensive)
+
+**WeakMap is cheap, WeakRef is not:**
+- WeakMap get/set: 12ms (1.35x over Map)
+- WeakRef manual cache: 28ms (3.1x over Map)
+- WeakMap handles GC cleanup internally with no `.deref()` call
+
+**FinalizationRegistry callbacks are asynchronous:**
+- Callbacks fire AFTER GC + microtask checkpoint
+- Not during GC, not synchronously, not predictably
+- Don't rely on them for correctness — only for cleanup
+
+**GC behavior:**
+- WeakRef target survives as long as any strong reference exists
+- After releasing strong ref: collected at next GC + microtask
+- FinalizationRegistry callbacks batched after collection
+
+**Do:**
+```js
+// GOOD — WeakMap for associating data with objects without preventing GC
+const metadata = new WeakMap();
+metadata.set(domNode, { clickCount: 0 });
+// domNode collected → entry auto-removed
+
+// GOOD — FinalizationRegistry for resource cleanup
+const registry = new FinalizationRegistry((fd) => fs.closeSync(fd));
+registry.register(wrapper, fd);
+
+// GOOD — WeakRef for optional cache that tolerates misses
+const cache = new Map();
+function getOrCompute(key) {
+  const ref = cache.get(key);
+  const val = ref?.deref();
+  if (val) return val;
+  const fresh = compute(key);
+  cache.set(key, new WeakRef(fresh));
+  return fresh;
+}
+```
+
+**Don't:**
+```js
+// BAD — WeakRef in hot path (12x per deref)
+for (const weak of refs) {
+  const obj = weak.deref(); // 35ns per call, adds up
+  if (obj) process(obj);
+}
+
+// BAD — relying on FinalizationRegistry for correctness
+const registry = new FinalizationRegistry((key) => {
+  criticalCleanup(key); // might never fire, or fire late
+});
+
+// BAD — WeakRef cache when WeakMap suffices (3x overhead)
+// Use WeakMap when keys are objects. Use WeakRef only when you need
+// to check if something still exists.
+```
+
+**Rule:** Use WeakMap for weak associations (1.35x). Use WeakRef only when you need to check existence (12x per deref). FinalizationRegistry for best-effort cleanup only — never for correctness.
+
+See: [`v8-weakref`](v8-weakref/)
+
+---
+
 *Built from bytecode experiments in this repo. Each recommendation verified with `node --print-bytecode`.*
