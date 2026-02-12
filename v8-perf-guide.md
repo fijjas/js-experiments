@@ -648,4 +648,57 @@ See: [`v8-delete-operator`](v8-delete-operator/)
 
 ---
 
+## 21. Optional chaining is free — and reads each property exactly once
+
+The myth that `?.` is slower than manual `&&` checks is wrong. At the bytecode level, optional chaining is not just syntactic sugar — it generates better code.
+
+**Benchmark results (N=10,000,000):**
+
+| Pattern (nested, all exist) | Time |
+|---|---|
+| `obj.b.c` (direct) | 62ms |
+| `obj?.b?.c` (optional) | 66ms |
+| `obj && obj.b && obj.b.c` (manual) | 72ms |
+
+All within noise. No measurable overhead.
+
+**The real insight is in the bytecode:**
+
+`obj?.b?.c` — 22 bytes:
+```
+Ldar a0                           // load obj
+Mov a0, r0                        // save to register
+JumpIfUndefinedOrNull [15]        // null/undef? → return undefined
+GetNamedProperty r0, [b]          // read obj.b ONCE, result in accumulator
+Star0                             // save to r0
+JumpIfUndefinedOrNull [8]         // null/undef? → return undefined
+GetNamedProperty r0, [c]          // read r0.c
+```
+
+`obj && obj.b && obj.b.c` — 20 bytes:
+```
+Ldar a0                           // load obj
+JumpIfToBooleanFalse [17]         // falsy? → return
+GetNamedProperty a0, [b]          // read obj.b (first time)
+JumpIfToBooleanFalse [11]         // falsy? → return
+GetNamedProperty a0, [b]          // read obj.b AGAIN (second time!)
+Star0
+GetNamedProperty r0, [c]          // read b.c
+```
+
+The manual version **reads `obj.b` twice** — once for the truthiness check, once to access `.c`. Optional chaining reads it once, stores the result, checks null/undefined, then continues from the stored value.
+
+**Semantic difference:** `?.` checks for `null`/`undefined` only (`JumpIfUndefinedOrNull`). `&&` coerces to boolean (`JumpIfToBooleanFalse`) — this catches `0`, `""`, `false`, `NaN` as "missing." For property chains, `?.` has the correct semantics.
+
+**Nullish coalescing vs logical OR:**
+```
+config.timeout ?? 30   // 61ms — returns 30 only if null/undefined
+config.timeout || 30   // 63ms — returns 30 if falsy (0 is falsy!)
+```
+Same performance, different semantics. `??` preserves `0`, `""`, `false`.
+
+See: [`v8-optional-chaining`](v8-optional-chaining/)
+
+---
+
 *Built from bytecode experiments in this repo. Each recommendation verified with `node --print-bytecode`.*
