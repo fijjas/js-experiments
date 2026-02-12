@@ -701,4 +701,77 @@ See: [`v8-optional-chaining`](v8-optional-chaining/)
 
 ---
 
+## 22. `for...in` is fastest for flat objects — `Object.entries` is always expensive
+
+The myth: "`for...in` is slow because it walks the prototype chain." The reality: it depends on whether the prototype HAS enumerable properties.
+
+**Benchmark results (N=2,000,000):**
+
+Small object (5 properties):
+
+| Pattern | Time | vs fastest |
+|---|---|---|
+| `for...in` | 35ms | **1x (fastest)** |
+| `Object.values + for-of` | 116ms | 3.3x |
+| `Object.keys + for loop` | 191ms | 5.5x |
+| `Object.keys + forEach` | 222ms | 6.3x |
+| `Object.entries + for-of` | 228ms | **6.5x slower** |
+
+With prototype (inherited enumerable properties):
+
+| Pattern | Time |
+|---|---|
+| `Object.keys + for loop` | 137ms (own props only) |
+| `for...in` (walks chain) | 592ms (4.3x slower) |
+| `for...in` + hasOwnProperty | 619ms |
+| `for...in` + Object.hasOwn | 689ms |
+
+At scale — 50 properties:
+
+| Pattern | Time |
+|---|---|
+| `Object.keys + for loop` | 3,536ms |
+| `for...in` | 4,871ms |
+| `Object.values` | 13,611ms |
+| `Object.entries` | **18,499ms** |
+
+**Why `for...in` is fast for flat objects:**
+
+Bytecode reveals: `for...in` uses specialized opcodes — `ForInEnumerate`, `ForInPrepare`, `ForInNext`, `ForInStep` — that iterate from a **register-based key cache** with zero allocation. No array created.
+
+`Object.keys` calls `CallProperty1 Object.keys(obj)` — **allocates a new Array** of key strings, then iterates that array. Two `GetKeyedProperty` per loop iteration (one for `keys[i]`, one for `obj[keys[i]]`).
+
+`Object.entries` allocates the keys array PLUS a `[key, value]` pair array for every property. At 50 properties, the collection alone costs 17,892ms vs 2,618ms for `Object.keys` — **7x more** just for allocation.
+
+**When to use what:**
+
+```js
+// GOOD — fastest for plain objects (no prototype properties)
+for (const k in obj) sum += obj[k];
+
+// GOOD — safest when prototype might have enumerable properties
+const keys = Object.keys(obj);
+for (let i = 0; i < keys.length; i++) doSomething(keys[i], obj[keys[i]]);
+
+// OK — when you only need values (3x slower but cleaner)
+for (const v of Object.values(obj)) sum += v;
+```
+
+```js
+// BAD — allocates pair arrays, 6.5x slower than for...in
+for (const [k, v] of Object.entries(obj)) { ... }
+// Use this for readability in cold paths. Avoid in hot loops.
+
+// BAD — unnecessary overhead
+for (const k in obj) {
+  if (obj.hasOwnProperty(k)) { ... }  // if the object is yours, skip this
+}
+```
+
+**Rule of thumb:** `for...in` for your own objects. `Object.keys` when shape is unknown. `Object.entries` only when readability matters more than performance.
+
+See: [`v8-object-iteration`](v8-object-iteration/)
+
+---
+
 *Built from bytecode experiments in this repo. Each recommendation verified with `node --print-bytecode`.*
