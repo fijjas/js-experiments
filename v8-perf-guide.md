@@ -854,4 +854,79 @@ See: [`v8-object-spread`](v8-object-spread/)
 
 ---
 
+## 24. Proxy costs ~20x for reads — but nesting is the real danger
+
+The myth: "Proxy is slow, never use it." The reality: ~20x overhead on property reads (still 34M ops/sec). Usable in most code. The real problems are nesting and a surprising empty-proxy trap.
+
+**Benchmark (N=5,000,000):**
+
+Property read:
+
+| Pattern | Time | Overhead |
+|---|---|---|
+| `obj.a` direct | 7ms | 1x |
+| `proxy.a` (get trap) | 144ms | 20x |
+| `proxy.a` (empty, no traps) | 164ms | 23x |
+| `obj.a` getter | 132ms | 19x |
+
+Proxy read overhead ≈ getter overhead. Both are trap mechanisms — the cost is the indirection, not the JS function call.
+
+**Empty proxy write — the trap:**
+
+| Pattern | Time | Overhead |
+|---|---|---|
+| `obj.x = 1` direct | 35ms | 1x |
+| proxy + set trap | 309ms | 9x |
+| empty proxy (no traps) | **1,775ms** | **51x** |
+
+Empty proxy with no set trap is 5.7x SLOWER than proxy with an explicit set trap. The internal [[Set]] path without a trap does more validation work than a simple `target[prop] = value`.
+
+**Nesting is linear:**
+
+| Depth | Time |
+|---|---|
+| 1 proxy | 153ms |
+| 2 proxies (proxy of proxy) | 691ms (4.5x) |
+| 3 proxies | 1,477ms (9.7x) |
+
+Each proxy level nearly doubles the cost. Proxy chains are multiplicative.
+
+**Reflect.get vs direct access in trap:**
+
+| Approach | Time |
+|---|---|
+| `target[prop]` in trap | 147ms |
+| `Reflect.get(target, prop, receiver)` | 249ms (+70%) |
+
+`Reflect.get` preserves receiver semantics (needed for getters on target), but costs 70% more. Use `target[prop]` when you know there are no getters.
+
+**Do:**
+```js
+// OK — 20x overhead but 34M ops/sec, fine for most code
+const proxy = new Proxy(target, {
+  get(target, prop) { return target[prop]; }
+});
+
+// GOOD — if you use a proxy, set explicit traps (especially set)
+const proxy = new Proxy(target, {
+  set(target, prop, value) { target[prop] = value; return true; }
+});
+```
+
+**Don't:**
+```js
+// BAD — empty proxy has WORSE write performance than one with traps
+const proxy = new Proxy(target, {}); // 51x slower writes
+
+// BAD — nesting proxies multiplies cost
+const p2 = new Proxy(new Proxy(target, handler), handler); // 4.5x per level
+
+// AVOID in hot paths — 20x read overhead adds up in tight loops
+for (let i = 0; i < 1e6; i++) proxy.value; // use target.value
+```
+
+See: [`v8-proxy`](v8-proxy/)
+
+---
+
 *Built from bytecode experiments in this repo. Each recommendation verified with `node --print-bytecode`.*
