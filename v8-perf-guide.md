@@ -432,6 +432,59 @@ cache.forEach((v, k) => process(k, v));  // 24x faster than for-in
 
 See: [`v8-map-vs-object`](v8-map-vs-object/)
 
+## 18. try-catch is free — throwing is not
+
+Historical claim: "try-catch prevents V8 optimization." True for Crankshaft (pre-2017). TurboFan handles it. Benchmarked at 10M iterations:
+
+| Test | Time | ops/sec | Notes |
+|---|---|---|---|
+| Sum, no try-catch | 1020ms | 9.8M | Baseline |
+| Sum, with try-catch (no throw) | 1064ms | 9.4M | **~4% overhead** |
+| Sum, rare throw (1/1M) | 1127ms | 8.9M | Negligible |
+| Narrow try (inside loop) | 1104ms | 9.1M | |
+| Wide try (outside loop) | 1082ms | 9.2M | Identical |
+| **Throw+catch (always throws)** | **72101ms** | **139K** | **700x slower than return** |
+| Return error (always errors) | 103ms | 97M | |
+| Property access via try-catch | 13155ms | 760K | 10% null rate |
+| Property access via if-check | 83ms | 121M | **159x faster** |
+| No try-catch | 64ms | 157M | Baseline |
+| 1-level try-catch | 63ms | 159M | Same |
+| 3-level nested | 71ms | 141M | Same |
+| 5-level nested | 74ms | 136M | **1.2x — negligible** |
+
+**Bytecode proof**: `noTry(n)` compiles to 9 bytes: `Ldar a0, MulSmi [2], AddSmi [1], Return`. `withTry(n)` compiles to 25 bytes but the happy path is identical — the only addition is `Mov <context> r0` (saving context for potential catch scope) and dead catch handler code (CreateCatchContext, SetPendingMessage, PushContext). TurboFan sees through try-catch completely on the non-throwing path.
+
+The real cost is `throw`: `new Error()` captures the full stack trace (walks the call stack, formats frame info), then the runtime unwinds the stack searching for a handler, creates a catch context, and restores the saved context. Each throw is ~0.007ms — 700x more than a function return.
+
+**Do:** Wrap code in try-catch freely for error safety. Zero meaningful overhead on the happy path.
+**Do:** Use if-checks for expected failure conditions (null, undefined, invalid input).
+**Don't:** Use try-catch as control flow. `try { obj.prop } catch { default }` is 159x slower than `if (obj != null) obj.prop`.
+**Don't:** Throw for non-exceptional conditions. Return error objects or null instead.
+
+```js
+// GOOD — try-catch for unexpected errors, zero overhead
+function processData(data) {
+  try {
+    return transform(data);
+  } catch (e) {
+    log.error(e);
+    return fallback;
+  }
+}
+
+// BAD — try-catch as control flow (159x slower)
+function getNestedValue(obj) {
+  try { return obj.a.b.c; } catch { return undefined; }
+}
+
+// GOOD — if-check for expected nulls
+function getNestedValue(obj) {
+  return obj?.a?.b?.c;
+}
+```
+
+See: [`v8-try-catch`](v8-try-catch/)
+
 ---
 
 *Built from bytecode experiments in this repo. Each recommendation verified with `node --print-bytecode`.*
