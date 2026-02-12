@@ -94,9 +94,10 @@ function parentThis() {
 }
 new parentThis();
 
-// === FINDING 3 (to verify): Arrow `this` access uses context slot
+// === FINDING 3 (VERIFIED in this-binding-bytecode.js): Arrow `this` uses context slot
 // === (receiver stored in parent context), while regular function
 // === uses its own receiver. Different bytecode paths for `this`.
+// === Arrow: 31 bytes constructor + 8 bytes inner. Regular: 16 + 5 bytes.
 
 // SUMMARY:
 // - Arrow vs regular: IDENTICAL bytecode for captured variables

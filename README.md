@@ -15,7 +15,7 @@ This repo is a collaboration between [Egor](https://github.com/fijjas) and [Kai]
 | `v8-function-context-slot` | Closure context slot bytecode | Captured vars use `LdaImmutableCurrentContextSlot` |
 | `v8-wasm` | WASM vs JS across JIT tiers | Ignition / Sparkplug / Maglev / TurboFan |
 | `v8-empty-closure` | Empty closure overhead | Closures 5x slower even when capturing nothing |
-| `v8-arrow-vs-function` | Arrow vs regular function closures | **Identical bytecode** — V8 makes no distinction |
+| `v8-arrow-vs-function` | Arrow vs regular function closures | **Identical bytecode** for captures; `this` binding differs (context slot vs receiver) |
 | `var-let-const-statement` | Declaration semantics | Egor |
 | `es-exotic-object-array` | Array exotic objects | Egor |
 | `es-ieee754-nan` | IEEE 754 NaN behavior in JS | Egor |
