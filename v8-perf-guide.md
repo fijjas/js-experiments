@@ -929,4 +929,76 @@ See: [`v8-proxy`](v8-proxy/)
 
 ---
 
+## 25. Generators: 12x per-yield overhead, but beat arrays for pipelines
+
+Generator creation is free (same cost as a regular function call). The cost is per yield — suspension/resumption overhead.
+
+**Benchmark (N=2,000,000):**
+
+Producing 5 values:
+
+| Pattern | Time | vs fastest |
+|---|---|---|
+| callback pattern | 19ms | 1x |
+| array for-of | 31ms | 1.6x |
+| generator for-of | 236ms | **12x** |
+| generator .next() manual | 258ms | 14x |
+
+Take 10 from infinite source:
+
+| Pattern | Time |
+|---|---|
+| for-loop | 22ms |
+| generator | 457ms — **21x slower** |
+
+**But pipelines tell a different story:**
+
+| Pattern (range 20 → map → filter) | Time |
+|---|---|
+| imperative for-loop | 60ms |
+| generator pipeline | **2,979ms** |
+| array .map().filter() | **3,563ms** |
+
+Generator pipeline is **1.2x faster** than array pipeline. Generators don't allocate intermediate arrays — each value flows through the chain lazily. Both are 50x slower than imperative.
+
+**yield\* delegation costs 1.56x:**
+- 6 direct yields: 330ms
+- 3 yield* + 3 direct: 515ms
+
+Each yield\* adds a forwarding layer.
+
+**Generator creation is free:**
+- Creating generator object: 13ms (= regular function call)
+- Creating + one .next(): 73ms — cost is in resumption, not creation
+
+**Do:**
+```js
+// GOOD — generators for lazy pipelines that replace array chains
+function* filter(gen, fn) {
+  for (const v of gen) if (fn(v)) yield v;
+}
+
+// GOOD — infinite sequences (no array allocation)
+function* naturals() { let n = 0; while (true) yield n++; }
+
+// GOOD — when you need to pause/resume computation
+```
+
+**Don't:**
+```js
+// BAD — generator where a for-loop suffices (12x overhead)
+function* range(n) { for (let i = 0; i < n; i++) yield i; }
+let sum = 0;
+for (const v of range(100)) sum += v; // just use for-loop
+
+// BAD — yield* chains when direct yields work
+function* delegated() { yield* inner(); } // 1.56x vs direct yields
+```
+
+**Rule:** Use generators for lazy evaluation and pipelines. Use for-loops when you know the bounds. Generator creation is free — the cost is per-yield.
+
+See: [`v8-generators`](v8-generators/)
+
+---
+
 *Built from bytecode experiments in this repo. Each recommendation verified with `node --print-bytecode`.*
