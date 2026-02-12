@@ -222,6 +222,41 @@ Also: Maglev (V8's mid-tier JIT) is **slower** than Sparkplug (baseline) for tig
 
 See: [`v8-wasm`](v8-wasm/)
 
+## 12. Keep object shapes consistent — megamorphic is 3-4x slower
+
+V8 assigns each object a hidden class ("Map") based on its property layout. Property access through inline caches (ICs) has four states: monomorphic (1 shape), polymorphic (2-4), and megamorphic (5+).
+
+Benchmark shows: **megamorphic access is 3-4x slower** than monomorphic. But 2-shape polymorphism is essentially free (<10% overhead). The cliff is at 5+ shapes.
+
+Property order creates different hidden classes (`{x, y}` is not `{y, x}`), but the performance impact is only 2-shape polymorphism — negligible. And adding a new shape to an optimized function triggers **deoptimization**: TurboFan bails out and falls back to the interpreter before recompiling.
+
+**Do:** Keep hot-path objects to 1-2 shapes.
+**Do:** Initialize all properties in the constructor (same order).
+**Don't:** Pass 5+ different object shapes through the same function.
+
+```js
+// monomorphic — fast (single hidden class)
+function Point(x, y) { this.x = x; this.y = y; }
+var points = [];
+for (var i = 0; i < 1000; i++) points.push(new Point(i, i));
+
+// megamorphic — 3-4x slower (8 different shapes)
+var mixed = [
+  {x: 1},
+  {x: 1, y: 2},
+  {x: 1, z: 3},
+  {x: 1, w: 4},
+  // ... more shapes through same function
+];
+
+// property order doesn't matter — only 2-shape poly, negligible
+var a = {}; a.x = 1; a.y = 2;
+var b = {}; b.y = 2; b.x = 1;
+// different hidden classes, but reading .x is still fast
+```
+
+See: [`v8-hidden-classes`](v8-hidden-classes/)
+
 ---
 
 ## The cost hierarchy
@@ -230,12 +265,13 @@ From bytecode analysis, the actual cost ranking:
 
 1. **Per-element function dispatch** (forEach/reduce vs for-loop) — 5-10x at scale
 2. **Lost inlining** (closures in hot paths) — orders of magnitude
-3. **Context allocation** (`CreateFunctionContext`) — per-closure overhead
-4. **Context slot access** (mutable vs immutable) — per-access micro-cost
-5. **Closure creation** (`CreateClosure`) — near-zero
-6. **Constant folding** — free at compile time
+3. **Megamorphic property access** (5+ object shapes) — 3-4x per access
+4. **Context allocation** (`CreateFunctionContext`) — per-closure overhead
+5. **Context slot access** (mutable vs immutable) — per-access micro-cost
+6. **Closure creation** (`CreateClosure`) — near-zero
+7. **Constant folding** — free at compile time
 
-Most JS performance advice focuses on #4-6. The real gains are in #1-3.
+Most JS performance advice focuses on #5-7. The real gains are in #1-4.
 
 ---
 

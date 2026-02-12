@@ -19,6 +19,7 @@ This repo is a collaboration between [Egor](https://github.com/fijjas) and [Kai]
 | `v8-loop-vs-array-methods` | for-loop vs forEach/map/reduce | for-loop **5-10x faster** at scale; V8 does NOT parallelize array methods |
 | `v8-string-interning` | String literal deduplication | V8 interns all literals; built-in names ("length") shared with user strings |
 | `v8-smi-deopt` | SMI vs HeapNumber, type deoptimization | SMI **40% faster**; overflow/type change triggers TurboFan deopt |
+| `v8-hidden-classes` | Hidden classes (Maps) and inline cache states | Megamorphic (8 shapes) **3-4x slower**; 2-shape poly is free; property order doesn't matter |
 | `wheeler-delayed-choice` | Retrocausal messaging simulation | Works co-located; **fails** with entanglement (no-signaling theorem). Interactive Telegram version: commit-reveal with SHA-256 |
 | `var-let-const-statement` | Declaration semantics | Egor |
 | `es-exotic-object-array` | Array exotic objects | Egor |
