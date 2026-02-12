@@ -141,7 +141,31 @@ arr.reduce(function(acc, x) { return acc + x; }, 0);
 
 See: [`v8-loop-vs-array-methods`](v8-loop-vs-array-methods/)
 
-## 8. WASM for compute, JS for everything else
+## 8. String literals are free — V8 interns everything
+
+V8 deduplicates all string literals at compile time. Two variables with `"hello"` share a **single heap object** — constant pool has one entry, both load from it.
+
+More importantly: built-in property names like `"length"`, `"prototype"`, `"constructor"` are the **same heap objects** your code uses. `var a = "length"` and `obj.length` reference the same V8 internal string.
+
+But: string concatenation of literals (`"hel" + "lo"`) is NOT constant-folded — it generates runtime `Add` bytecode. Only numeric expressions fold.
+
+**Do:** Use string literals freely — no memory cost for repetition.
+**Do:** Use `===` for interned string comparison — it's O(1) reference equality.
+**Don't:** Build strings with concatenation when a literal would do.
+
+```js
+// both use the same constant pool entry — zero duplication
+var a = "hello";
+var b = "hello";
+a === b;  // true, O(1) reference check
+
+// NOT folded — generates runtime Add + 3 constant pool entries
+var c = "hel" + "lo";  // avoid this if "hello" would suffice
+```
+
+See: [`v8-string-interning`](v8-string-interning/)
+
+## 9. WASM for compute, JS for everything else
 
 WebAssembly runs as near-native machine code without GC pauses or type speculation overhead. For pure computation (tight loops, math), WASM is 10-100x faster.
 
