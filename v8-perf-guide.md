@@ -165,7 +165,50 @@ var c = "hel" + "lo";  // avoid this if "hello" would suffice
 
 See: [`v8-string-interning`](v8-string-interning/)
 
-## 9. WASM for compute, JS for everything else
+## 9. Stay in SMI range — HeapNumber costs 40%
+
+V8 stores small integers (up to 2^31-1 on x64) as tagged pointers — no heap allocation. Floats and overflow values become HeapNumber objects on the heap.
+
+Benchmark shows: **SMI arithmetic ~620ms vs HeapNumber ~880ms** (40% penalty). And when SMI overflows mid-computation, TurboFan catches it and triggers deoptimization (`reason: overflow`), falling back to Ignition.
+
+**Do:** Keep counters and indices in SMI range when possible.
+**Do:** Use `| 0` or `Math.trunc()` to keep integer results as SMI.
+**Don't:** Mix integers and floats in the same variable in hot paths.
+
+```js
+// SMI — fast (tagged pointer, no heap)
+var sum = 0;
+for (var i = 0; i < 100; i++) sum += i;
+
+// HeapNumber — 40% slower (heap allocation per value)
+var sum = 2147483647;
+for (var i = 0; i < 100; i++) sum += 0.1;
+```
+
+See: [`v8-smi-deopt`](v8-smi-deopt/)
+
+## 10. Keep types stable — avoid deoptimization
+
+TurboFan optimizes functions based on observed types. When a function trained on numbers receives a string, TurboFan bails out (`reason: not a Smi`) and falls back to the interpreter.
+
+Bytecode itself is type-blind — Ignition doesn't care. The cost is at the JIT level: deoptimization discards compiled code and restarts with the interpreter.
+
+**Do:** Keep variables and function arguments type-consistent.
+**Don't:** Reuse variables for different types (`var a = 1; a = "hello"; a = []`).
+**Do:** Pre-allocate arrays with `new Array(n)` for known sizes (2.5x faster than growing).
+
+```js
+// type-stable — TurboFan optimizes and stays optimized
+function add(a, b) { return a + b; }
+for (var i = 0; i < 100000; i++) add(i, i + 1);
+
+// type-unstable — triggers deoptimization
+add("hello", " world");  // bailout: "not a Smi"
+```
+
+See: [`v8-smi-deopt`](v8-smi-deopt/)
+
+## 11. WASM for compute, JS for everything else
 
 WebAssembly runs as near-native machine code without GC pauses or type speculation overhead. For pure computation (tight loops, math), WASM is 10-100x faster.
 
