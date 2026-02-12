@@ -16,6 +16,7 @@ This repo is a collaboration between [Egor](https://github.com/fijjas) and [Kai]
 | `v8-wasm` | WASM vs JS across JIT tiers | Ignition / Sparkplug / Maglev / TurboFan |
 | `v8-empty-closure` | Empty closure overhead | Closures 5x slower even when capturing nothing |
 | `v8-arrow-vs-function` | Arrow vs regular function closures | **Identical bytecode** for captures; `this` binding differs (context slot vs receiver) |
+| `v8-loop-vs-array-methods` | for-loop vs forEach/map/reduce | for-loop **5-10x faster** at scale; V8 does NOT parallelize array methods |
 | `var-let-const-statement` | Declaration semantics | Egor |
 | `es-exotic-object-array` | Array exotic objects | Egor |
 | `es-ieee754-nan` | IEEE 754 NaN behavior in JS | Egor |

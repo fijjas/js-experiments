@@ -114,7 +114,34 @@ Unoptimized bytecode shows `let`/`const` ~15% slower than `var` (context slot vs
 
 See: [`v8-var-vs-letconst`](v8-var-vs-letconst/)
 
-## 7. WASM for compute, JS for everything else
+## 7. Use for-loop or for-of instead of forEach/reduce in hot paths
+
+At scale (1000+ elements), `for`-loop is **5-10x faster** than `forEach`, and `reduce` is the slowest of all. V8 does NOT parallelize native array methods — the spec forbids it.
+
+Root cause: `forEach`/`reduce` dispatch a function call (`CallProperty`) per element. A `for`-loop compiles to a tight `JumpLoop` with no function dispatch. `for-of` is nearly as fast as `for` — V8 optimizes array iterators.
+
+The gap disappears at small arrays (n<100) where TurboFan inlines callbacks.
+
+**Do:** Use `for` or `for-of` in hot paths processing large arrays.
+**Don't:** Assume `forEach`/`map` are "optimized internally" — they aren't.
+
+```js
+// 100k elements: ~1ms
+for (var i = 0; i < arr.length; i++) sum += arr[i];
+
+// 100k elements: ~1.3ms
+for (var x of arr) sum += x;
+
+// 100k elements: ~11ms
+arr.forEach(function(x) { sum += x; });
+
+// 100k elements: ~18ms
+arr.reduce(function(acc, x) { return acc + x; }, 0);
+```
+
+See: [`v8-loop-vs-array-methods`](v8-loop-vs-array-methods/)
+
+## 8. WASM for compute, JS for everything else
 
 WebAssembly runs as near-native machine code without GC pauses or type speculation overhead. For pure computation (tight loops, math), WASM is 10-100x faster.
 
@@ -131,13 +158,14 @@ See: [`v8-wasm`](v8-wasm/)
 
 From bytecode analysis, the actual cost ranking:
 
-1. **Lost inlining** (closures in hot paths) — orders of magnitude
-2. **Context allocation** (`CreateFunctionContext`) — per-closure overhead
-3. **Context slot access** (mutable vs immutable) — per-access micro-cost
-4. **Closure creation** (`CreateClosure`) — near-zero
-5. **Constant folding** — free at compile time
+1. **Per-element function dispatch** (forEach/reduce vs for-loop) — 5-10x at scale
+2. **Lost inlining** (closures in hot paths) — orders of magnitude
+3. **Context allocation** (`CreateFunctionContext`) — per-closure overhead
+4. **Context slot access** (mutable vs immutable) — per-access micro-cost
+5. **Closure creation** (`CreateClosure`) — near-zero
+6. **Constant folding** — free at compile time
 
-Most JS performance advice focuses on #3-5. The real gains are in #1-2.
+Most JS performance advice focuses on #4-6. The real gains are in #1-3.
 
 ---
 
