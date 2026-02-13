@@ -391,6 +391,8 @@ From bytecode analysis, the actual cost ranking:
 10. **Closure creation** (`CreateClosure`) — near-zero
 11. **Constant folding** — free at compile time
 
+12. **Single-return phi-node overhead for strings** — 3.6x for classification (TurboFan only)
+
 Most JS performance advice focuses on #6-9. The real gains are in #1-5.
 
 ## 17. Map vs Object: Map wins for mutation and iteration, Object wins for lookup
@@ -1159,6 +1161,85 @@ const registry = new FinalizationRegistry((key) => {
 **Rule:** Use WeakMap for weak associations (1.35x). Use WeakRef only when you need to check existence (12x per deref). FinalizationRegistry for best-effort cleanup only — never for correctness.
 
 See: [`v8-weakref`](v8-weakref/)
+
+---
+
+## 28. Multiple returns vs single return: TurboFan cares for string classification
+
+**Myth:** "Use a single return point for cleaner code." / "Multiple returns are faster."
+
+**Reality:** For most functions, it doesn't matter at all. But TurboFan optimizes multi-return string classification 3.6x faster than single-return with deferred assignment.
+
+**Benchmarks (N=20,000,000):**
+
+TurboFan (default):
+
+| Test | Multi (ms) | Single (ms) | Ratio | Difference |
+|---|---|---|---|---|
+| Classification (string return) | 54 | 196 | 0.27x | **multi 3.6x faster** |
+| Numeric computation (guard) | 171 | 155 | 1.10x | ~tied |
+| Validation (many exits) | 164 | 168 | 0.98x | ~tied |
+| Deep nesting (branchy) | 156 | 156 | 1.00x | tied |
+
+Maglev only (`--no-turbofan`): all tests within 4% — no meaningful difference.
+
+Interpreter only (`--no-opt`): all tests within 6% — no meaningful difference.
+
+**The anomaly is TurboFan-specific and string-specific.**
+
+Multi-return version:
+```js
+function classifyMulti(x, y) {
+  const val = x * y;
+  if (val < 100) return 'small';
+  if (val < 1000) return 'medium';
+  if (val < 5000) return 'large';
+  return 'huge';
+}
+```
+
+Single-return version:
+```js
+function classifySingle(x, y) {
+  const val = x * y;
+  let result;
+  if (val < 100) result = 'small';
+  else if (val < 1000) result = 'medium';
+  else if (val < 5000) result = 'large';
+  else result = 'huge';
+  return result;
+}
+```
+
+**Why?** In multi-return, each exit path returns a known string constant — TurboFan can optimize each independently with no phi-node merging. In single-return, `result` starts as `undefined`, gets assigned one of four strings, then returns. TurboFan must create a phi node at the merge point to prove `result` is always a string (never `undefined`). This merge prevents some optimizations or forces a more conservative code path.
+
+The numeric/boolean tests don't show this because numbers have a single representation in optimized code — no type ambiguity to resolve.
+
+**Do:**
+```js
+// slightly faster under TurboFan for string classification
+function classify(val) {
+  if (val < 10) return 'tiny';
+  if (val < 100) return 'small';
+  if (val < 1000) return 'medium';
+  return 'large';
+}
+```
+
+**Don't worry:**
+```js
+// for non-string returns, style doesn't affect performance
+function compute(x) {
+  if (x < 0) return -1;
+  if (x === 0) return 0;
+  return 1;
+}
+// identical performance to single-return version
+```
+
+**Rule:** Write whichever style is clearest. The only measurable case is string-returning branchy functions under TurboFan — ~7.5ns per call difference. Unless you're classifying millions of items in a hot loop, it doesn't matter.
+
+See: [`v8-single-vs-multi-return`](v8-single-vs-multi-return/)
 
 ---
 
